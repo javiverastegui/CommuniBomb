@@ -94,7 +94,7 @@ class Slot {
       new THREE.PlaneGeometry(FACE, FACE),
       new THREE.MeshStandardMaterial({
         map: this.texture, emissive: 0xffffff, emissiveMap: this.glowTexture, emissiveIntensity: 1.8,
-        roughness: 0.55, metalness: 0.2,
+        roughness: 0.78, metalness: 0.05,
       }),
     );
     this.faceMesh.position.z = 0.0355;
@@ -179,7 +179,7 @@ export class BombView {
     this.dpr = Math.min(window.devicePixelRatio, MAX_DPR);
     r.setPixelRatio(this.dpr);
     r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.05;
+    r.toneMappingExposure = 0.92;
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
     r.shadowMap.autoUpdate = false; // solo se recalculan cuando la bomba se mueve
@@ -201,17 +201,18 @@ export class BombView {
     this.camLook = new THREE.Vector3();
 
     scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x1a1208, 0.5));
-    const key = new THREE.SpotLight(0xffd9a0, 140, 30, 0.55, 0.55, 1.5);
+    const key = new THREE.SpotLight(0xffd9a0, 95, 30, 0.55, 0.55, 1.5);
     key.position.set(-3.6, 6.5, 5.2);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
     key.shadow.bias = -0.0004;
     key.shadow.radius = 4;
+    key.shadow.intensity = 0.6; // sombras más suaves
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0x8fb0ff, 0.6);
+    const fill = new THREE.DirectionalLight(0x8fb0ff, 0.45);
     fill.position.set(5, 1.5, 3);
     scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xffb070, 0.8);
+    const rim = new THREE.DirectionalLight(0xffb070, 0.55);
     rim.position.set(2, 3, -6);
     scene.add(rim);
 
@@ -230,7 +231,7 @@ export class BombView {
 
     this.composer = new EffectComposer(r);
     this.composer.addPass(new RenderPass(scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.4, 0.82);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.38, 0.4, 0.85);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
 
