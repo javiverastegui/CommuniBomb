@@ -53,7 +53,6 @@ export function sevenSeg(ui, ctx, str, x, y, { w = 64, h = 120, t = 12, gap = 16
 
 export const timerFace = {
   regions: () => [],
-  animated: () => true,
   draw(ctx, view, ui) {
     plate(ctx, { tone: 'dark', led: false });
     // strikes

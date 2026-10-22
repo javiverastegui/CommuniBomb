@@ -17,6 +17,9 @@ const PITCH = 1.08;
 const FACE = 0.92;
 const FOV = 38;
 const TWO_PI = Math.PI * 2;
+const ANIM_STEP = 1 / 30; // las caras animadas se redibujan a 30 fps como máximo
+const MAX_DPR = 1.5;
+const MIN_DPR = 1;
 
 function slotLocal(slot) {
   const back = slot >= 6;
@@ -118,17 +121,21 @@ class Slot {
     this.dirty = true;
   }
 
-  render(t) {
+  // `visible`: la cara mira hacia la cámara. Las ocultas no se redibujan; si
+  // quedaron sucias, se pintan en cuanto vuelven a verse.
+  render(t, visible) {
     if (!this.view) return;
     this.ui.t = t;
     this.ui.age = (performance.now() - (this.receivedAt || 0)) / 1000;
-    if (this.dirty || this.face.animated?.(this.view, this.ui)) {
+    const due = this.dirty || (t - (this.drawnAt ?? -1) >= ANIM_STEP && this.face.animated?.(this.view, this.ui));
+    if (visible && due) {
       this.glowCtx.fillStyle = '#000';
       this.glowCtx.fillRect(0, 0, PX, PX);
       this.face.draw(this.ctx, this.view, this.ui);
       this.texture.needsUpdate = true;
       this.glowTexture.needsUpdate = true;
       this.dirty = false;
+      this.drawnAt = t;
     }
     if (this.ledMat) {
       const strike = this.ui.strikeAt !== null && t - this.ui.strikeAt < 1.1;
@@ -163,13 +170,21 @@ export class BombView {
     this.ended = false;
     this.lastSecond = null;
     this.clock = new THREE.Clock();
+    this._n = new THREE.Vector3();
+    this._p = new THREE.Vector3();
+    this._q = new THREE.Quaternion();
 
-    const r = (this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' }));
-    r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Sin antialias: el EffectComposer renderiza a un render target y lo descartaría igual.
+    const r = (this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' }));
+    this.dpr = Math.min(window.devicePixelRatio, MAX_DPR);
+    r.setPixelRatio(this.dpr);
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.05;
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.autoUpdate = false; // solo se recalculan cuando la bomba se mueve
+    this.shadowPose = null;
+    this.perf = { frames: 0, time: 0 };
     r.domElement.className = 'three';
     container.appendChild(r.domElement);
 
@@ -265,6 +280,7 @@ export class BombView {
       if (!m && s !== TIMER_SLOT) slot.setView({}, true);
     }
     this.bomb.add(buildWidgets(state.edgework, CASE));
+    this.shadowPose = null;
   }
 
   setState(state) {
@@ -523,10 +539,47 @@ export class BombView {
     this.camera.updateProjectionMatrix();
   }
 
+  // Recalcula sombras solo si la bomba giró o se desplazó de forma apreciable.
+  updateShadows() {
+    const pose = [this.rot.pitch, this.rot.yaw, this.bomb.position.y];
+    const last = this.shadowPose;
+    if (!last || Math.abs(pose[0] - last[0]) > 1e-3 || Math.abs(pose[1] - last[1]) > 1e-3 || Math.abs(pose[2] - last[2]) > 0.005) {
+      this.renderer.shadowMap.needsUpdate = true;
+      this.shadowPose = pose;
+    }
+  }
+
+  // Si el equipo no alcanza ~40 fps, baja la resolución de render (nunca la sube).
+  adaptQuality(rawDt) {
+    if (rawDt > 0.5) { this.perf.frames = this.perf.time = 0; return; } // pestaña oculta o pausa
+    this.perf.frames++;
+    this.perf.time += rawDt;
+    if (this.perf.time < 2) return;
+    const fps = this.perf.frames / this.perf.time;
+    this.perf.frames = this.perf.time = 0;
+    if (fps < 40 && this.dpr > MIN_DPR) {
+      this.dpr = Math.max(MIN_DPR, this.dpr - 0.25);
+      this.renderer.setPixelRatio(this.dpr);
+      this.composer.setPixelRatio(this.dpr);
+      this.resize();
+    }
+  }
+
+  slotVisible(slot) {
+    const n = this._n.set(0, 0, 1).applyQuaternion(slot.group.getWorldQuaternion(this._q));
+    const p = slot.group.getWorldPosition(this._p);
+    p.sub(this.camera.position);
+    return n.dot(p) < 0.1 * p.length(); // margen para caras vistas casi de canto
+  }
+
   loop() {
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const rawDt = this.clock.getDelta();
+    const dt = Math.min(rawDt, 0.05);
     const t = this.clock.elapsedTime;
+    this.adaptQuality(rawDt);
+    this.updateCamera(dt, t);
+    this.bomb.updateMatrixWorld();
     if (this.built) {
       const rem = this.remaining();
       const display = formatTimer(rem);
@@ -546,10 +599,10 @@ export class BombView {
           if (left !== s.lastLeft && left <= 10 && s.view.rate < 0) audio.needyAlarm();
           s.lastLeft = left;
         }
-        s.render(t);
+        s.render(t, this.slotVisible(s));
       }
     }
-    this.updateCamera(dt, t);
+    this.updateShadows();
     this.composer.render();
   }
 
